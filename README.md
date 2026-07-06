@@ -197,11 +197,11 @@ The exact tool set depends on which scripts are used.
 
 - `reapr`
 - `ragtag.py`
-- `nextPolish` / `nextpolish`
+- `NextPolish` command-line executable (`nextPolish`)
 - optional `polca.sh`
 - `seqtk`
 - `samtools`
-- one REAPR mapper path: `smalt`, `bwa-mem2`, or `strobealign`
+- one REAPR mapper path: `smalt`, `bwa-mem2`, or `minibwa`
 - `minimap2` for RagTag read validation when enabled
 
 ### `ragtag_project.sh`
@@ -253,6 +253,10 @@ bash run_callable_assembly.sh --help
 - Treat callable masks as coordinate-specific objects, not portable sample-independent BED files.
 - Prefer read-backed correction and conservative callable thresholds over aggressive contiguity gains.
 - Use stable work directories and logs so each stage can be audited.
+
+## Citation
+
+A formal citation for this utility repository is being prepared. For now, cite the underlying tools used in the specific workflow you run.
 
 ## License
 

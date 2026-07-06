@@ -105,10 +105,10 @@ REAPR options:
   REAPR_FILTER_FF=904
   REAPR_FILTER_MAPQ=0
   SAMTOOLS_SORT_STYLE=auto (auto|new|old)
-  REAPR_ALIGNER=smalt (smalt|bwa-mem2|strobealign)
+  REAPR_ALIGNER=smalt (smalt|bwa-mem2|minibwa)
   REAPR_BAM= (optional; precomputed paired BAM)
   BWA_MEM2_ARGS=-SP
-  STROBEALIGN_ARGS="--mcs=always -R 0"
+  MINIBWA_ARGS=
 
 Tool overrides:
   PY3=python3
@@ -166,8 +166,8 @@ SAMTOOLS_SORT_STYLE=${SAMTOOLS_SORT_STYLE:-auto}
 REAPR_ALIGNER=${REAPR_ALIGNER:-smalt}
 REAPR_BAM=${REAPR_BAM:-}
 BWA_MEM2_ARGS=${BWA_MEM2_ARGS:--SP}
-STROBEALIGN_BIN=${STROBEALIGN_BIN:-strobealign}
-STROBEALIGN_ARGS=${STROBEALIGN_ARGS:---mcs=always -R 0}
+MINIBWA_BIN=${MINIBWA_BIN:-minibwa}
+MINIBWA_ARGS=${MINIBWA_ARGS:-}
 
 RAGTAG_PATCH_NUCMER_PARAMS=${RAGTAG_PATCH_NUCMER_PARAMS:---maxmatch -l 100 -c 500}
 RAGTAG_FILTER_PROCS=${RAGTAG_FILTER_PROCS:-$THREADS}
@@ -398,11 +398,11 @@ require_reapr_aligner() {
     bwa-mem2)
       require_cmd bwa-mem2
       ;;
-    strobealign)
-      require_cmd "$STROBEALIGN_BIN"
+    minibwa)
+      require_cmd "$MINIBWA_BIN"
       ;;
     *)
-      echo "ERROR: REAPR_ALIGNER must be smalt, bwa-mem2, or strobealign; got: $REAPR_ALIGNER" >&2
+      echo "ERROR: REAPR_ALIGNER must be smalt, bwa-mem2, or minibwa; got: $REAPR_ALIGNER" >&2
       exit 1
       ;;
   esac
@@ -532,15 +532,19 @@ else
       run_with_log "$LOGDIR/reapr_bwa2_sort.log" \
         samtools_sort_index "$tmp_bam" "$REAPR_MAP_BAM" "$SAMTOOLS_SORT_STYLE"
       rm -f "$tmp_bam"
-    else
-      tmp_bam=$REAPR_DIR/reapr.paired.tmp.bam
+    elif [[ "$REAPR_ALIGNER" == "minibwa" ]]; then
+      tmp_bam=$REAPR_DIR/reapr.minibwa.tmp.bam
       if exists_nonempty "$tmp_bam"; then
-        log "REAPR strobealign temp BAM exists; skipping mapping"
+        log "REAPR minibwa temp BAM exists; skipping mapping"
       else
-        run_with_log "$LOGDIR/reapr_strobealign_map.log" bash -lc \
-          "$STROBEALIGN_BIN -t $REAPR_THREADS $STROBEALIGN_ARGS '$REAPR_CHECKED' '$current_r1' '$current_r2' | samtools view -b - > '$tmp_bam'"
+        if [[ ! -s "${REAPR_CHECKED}.mbw" || ! -s "${REAPR_CHECKED}.l2b" ]]; then
+          run_with_log "$LOGDIR/reapr_minibwa_index.log" bash -lc \
+            "$MINIBWA_BIN index -t $REAPR_THREADS '$REAPR_CHECKED'"
+        fi
+        run_with_log "$LOGDIR/reapr_minibwa_map.log" bash -lc \
+          "$MINIBWA_BIN map -t $REAPR_THREADS $MINIBWA_ARGS '$REAPR_CHECKED' '$current_r1' '$current_r2' | samtools view -b - > '$tmp_bam'"
       fi
-      run_with_log "$LOGDIR/reapr_strobealign_sort.log" \
+      run_with_log "$LOGDIR/reapr_minibwa_sort.log" \
         samtools_sort_index "$tmp_bam" "$REAPR_MAP_BAM" "$SAMTOOLS_SORT_STYLE"
       rm -f "$tmp_bam"
     fi
