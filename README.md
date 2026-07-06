@@ -6,12 +6,13 @@ These scripts were developed in the context of a short-read draft assembly workf
 
 ## Scope
 
-This repository provides four reusable utilities:
+This repository provides five reusable utilities:
 
 1. `reapr_patch_nextpolish.sh` — refine an Illumina-only draft assembly before projection.
 2. `ragtag_project.sh` — project an already polished assembly onto one reference with RagTag correct/scaffold.
 3. `map_for_callable.sh` — remap reads to one final FASTA and create a sorted/indexed BAM.
 4. `run_callable_assembly.sh` — derive callable regions and write callable-masked FASTA outputs.
+5. `ab_window_core_shell.sh` — classify A/B assembly windows and quantify coordinate core/shell callable space.
 
 It is not a complete manuscript-support archive, workflow manager, figure-generation repository, or turnkey species-specific pipeline.
 
@@ -21,14 +22,18 @@ It is not a complete manuscript-support archive, workflow manager, figure-genera
 .
 ├── LICENSE
 ├── README.md
+├── ab_window_core_shell.env.example
+├── ab_window_core_shell.sh
 ├── callable_assembly.env.example
 ├── map_for_callable.env.example
 ├── map_for_callable.sh
+├── quantify_core_shell.py
 ├── ragtag_project.env.example
 ├── ragtag_project.sh
 ├── reapr_patch_nextpolish.env.example
 ├── reapr_patch_nextpolish.sh
-└── run_callable_assembly.sh
+├── run_callable_assembly.sh
+└── window_liftover_stats.py
 ```
 
 ## Recommended workflow
@@ -58,7 +63,11 @@ branch scaffold FASTA + PE reads
 
 branch scaffold FASTA + scaffold-coordinate remap BAM
   └── run_callable_assembly.sh MODE=scaffold_bam
-        -> optional scaffold-remap callable sensitivity layer
+        -> branch-specific callable BED and callable-masked FASTA
+
+A/B branch FASTAs + A/B callable BEDs
+  └── ab_window_core_shell.sh
+        -> A/B window classes, callable core, callable shell, summary tables
 ```
 
 The critical rule is that a BAM must be aligned to the same coordinate FASTA used by `run_callable_assembly.sh`, unless `MODE=corrected_query_agp` is used with a corrected-query BAM plus the corresponding RagTag AGP file.
@@ -182,6 +191,29 @@ OUTDIR=/path/to/results/callable_assembly/sample_refA_scaffold \
 bash run_callable_assembly.sh
 ```
 
+## Script 5: `ab_window_core_shell.sh`
+
+This script treats the two projected branches as coordinate-specific views of the same sample. It aligns A against B and B against A, classifies fixed windows as one-to-one, one-to-many, or unmapped, and intersects those window classes with branch-specific callable BED files.
+
+### Main outputs
+
+- `OUTDIR/stats/A_to_B_window_classification_primary.tsv`
+- `OUTDIR/stats/B_to_A_window_classification_primary.tsv`
+- `COMPARE_OUT/tableS_window_primary.tsv`
+- `COMPARE_OUT/tableS_callable.tsv`
+- `COMPARE_OUT/tableS_core_shell.tsv`
+- `OUTDIR/core_shell/bed/<reference>/*.bed`
+
+### Minimal use
+
+```bash
+cp ab_window_core_shell.env.example ab_window_core_shell.env
+$EDITOR ab_window_core_shell.env
+bash ab_window_core_shell.sh ab_window_core_shell.env
+```
+
+The primary coordinate space is controlled by `PRIMARY_REGEX_A` and `PRIMARY_REGEX_B`. Use `.*` only when the branch FASTA files contain only the sequences that should contribute to the primary comparison.
+
 ## Requirements
 
 The exact tool set depends on which scripts are used.
@@ -222,6 +254,12 @@ The exact tool set depends on which scripts are used.
 - `bedtools`
 - `python3`
 
+### `ab_window_core_shell.sh`
+
+- `samtools`
+- `minimap2`
+- `python3`
+
 ## Installation
 
 ```bash
@@ -239,11 +277,15 @@ bash -n reapr_patch_nextpolish.sh
 bash -n ragtag_project.sh
 bash -n map_for_callable.sh
 bash -n run_callable_assembly.sh
+bash -n ab_window_core_shell.sh
 
 bash reapr_patch_nextpolish.sh --help
 bash ragtag_project.sh --help
 bash map_for_callable.sh --help
 bash run_callable_assembly.sh --help
+bash ab_window_core_shell.sh --help
+
+python3 -m py_compile window_liftover_stats.py quantify_core_shell.py
 ```
 
 ## Design philosophy
@@ -251,6 +293,7 @@ bash run_callable_assembly.sh --help
 - Keep reference-guided projection explicit and per-reference.
 - Keep BAM generation separate from callable-mask materialization.
 - Treat callable masks as coordinate-specific objects, not portable sample-independent BED files.
+- Treat A/B core as the intersection of stable coordinate windows and callable sequence, not as either branch-specific callable BED alone.
 - Prefer read-backed correction and conservative callable thresholds over aggressive contiguity gains.
 - Use stable work directories and logs so each stage can be audited.
 
