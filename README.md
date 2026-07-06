@@ -1,24 +1,19 @@
 # assembly-callable-utils
 
-Portable wrappers for read-backed assembly refinement and callable-constrained assembly materialization.
+Portable shell utilities for read-backed short-read assembly refinement, reference-guided projection, read remapping, and callable-constrained assembly materialization.
 
-This repository provides two representative custom scripts developed in the SJF workflow:
-
-- `reapr_patch_nextpolish_ragtag.sh`: a conservative read-backed assembly-refinement wrapper
-- `run_callable_assembly.sh`: a utility for materializing callable-constrained assembly views from scaffold FASTA and alignment-derived callable regions
-
-These scripts were developed in the context of a short-read draft assembly workflow, but they are not species-specific and can be adapted to similar projects in other non-model systems.
+These scripts were developed in the context of a short-read draft assembly workflow, but they are not species-specific and can be adapted to similar projects in other non-model systems. Paths are supplied through environment variables or `.env` files.
 
 ## Scope
 
-This repository is intentionally narrow.
+This repository provides four reusable utilities:
 
-It documents two reusable utility scripts:
+1. `reapr_patch_nextpolish.sh` — refine an Illumina-only draft assembly before projection.
+2. `ragtag_project.sh` — project an already polished assembly onto one reference with RagTag correct/scaffold.
+3. `map_for_callable.sh` — remap reads to one final FASTA and create a sorted/indexed BAM.
+4. `run_callable_assembly.sh` — derive callable regions and write callable-masked FASTA outputs.
 
-1. one **assembly-refinement wrapper**
-2. one **callable-region materialization utility**
-
-It does **not** constitute a full public release of all manuscript-support scripts, intermediate analysis code, figure-generation notebooks, or the complete end-to-end workflow used in the associated study.
+It is not a complete manuscript-support archive, workflow manager, figure-generation repository, or turnkey species-specific pipeline.
 
 ## Contents
 
@@ -27,294 +22,238 @@ It does **not** constitute a full public release of all manuscript-support scrip
 ├── LICENSE
 ├── README.md
 ├── callable_assembly.env.example
-├── reapr_patch_nextpolish_ragtag.sh
-├── reapr_patch_nextpolish_ragtag.env.example
+├── map_for_callable.env.example
+├── map_for_callable.sh
+├── ragtag_project.env.example
+├── ragtag_project.sh
+├── reapr_patch_nextpolish.env.example
+├── reapr_patch_nextpolish.sh
 └── run_callable_assembly.sh
 ```
 
-## Script 1: `reapr_patch_nextpolish_ragtag.sh`
+## Recommended workflow
 
-This script implements a conservative, read-backed refinement path for a draft assembly.
+For one sample and two references, the intended order is:
+
+```text
+primary assembly + donor assembly + PE reads
+  └── reapr_patch_nextpolish.sh
+        -> polished unanchored assembly
+
+polished assembly + reference A + PE reads
+  └── ragtag_project.sh
+        -> reference-A corrected/scaffold branch
+
+polished assembly + reference B + PE reads
+  └── ragtag_project.sh
+        -> reference-B corrected/scaffold branch
+
+branch FASTA + branch corrected-query BAM + AGP
+  └── run_callable_assembly.sh MODE=corrected_query_agp
+        -> primary branch callable BED and callable-masked FASTA
+
+branch scaffold FASTA + PE reads
+  └── map_for_callable.sh
+        -> scaffold-coordinate remap BAM
+
+branch scaffold FASTA + scaffold-coordinate remap BAM
+  └── run_callable_assembly.sh MODE=scaffold_bam
+        -> optional scaffold-remap callable sensitivity layer
+```
+
+The critical rule is that a BAM must be aligned to the same coordinate FASTA used by `run_callable_assembly.sh`, unless `MODE=corrected_query_agp` is used with a corrected-query BAM plus the corresponding RagTag AGP file.
+
+`reapr_patch_nextpolish.sh` intentionally stops at the polished unanchored assembly. Reference-guided RagTag correct/scaffold is handled by `ragtag_project.sh`, which should be run separately for each reference branch.
+
+## Script 1: `reapr_patch_nextpolish.sh`
+
+This script implements a conservative read-backed refinement path for a draft assembly.
 
 ### Main stages
 
-1. **REAPR** breakpoint detection and breaking
-2. **RagTag patch** using a donor assembly
-3. **NextPolish** Illumina polishing by default (`POLCA` optional)
-4. **RagTag correct** with read validation (optional; requires reference)
-5. **RagTag reference-guided scaffolding** (optional; requires reference)
+1. REAPR breakpoint detection and breaking
+2. RagTag patch using a donor assembly
+3. NextPolish Illumina polishing by default (`POLCA` optional)
 
-### Intended use
+This script does not run RagTag correct/scaffold and does not run post-polish redundancy or contamination filtering. Run `ragtag_project.sh` for reference projection, and use a separate local cleanup stage if `sortnr`, FCS-GX, or other post-polish filters are needed.
 
-Use this script when you have:
-
-- a primary draft assembly
-- a donor assembly for patching
-- paired-end short reads
-- optionally, a scaffold- or chromosome-level reference assembly
-
-### Key behavior
-
-- **NextPolish** is the default polisher
-- `POLCA` is optional
-- RagTag correct/scaffold steps are **optional** and are only activated when `REFERENCE_ASM` is provided
-- the script uses **resume-style behavior**: completed stages are skipped when their main outputs already exist
-- logs are written under `WORKDIR/logs/`
-
-### Typical inputs
-
-- `PRIMARY_ASM`
-- `DONOR_ASM`
-- `R1`
-- `R2`
-- optional `REFERENCE_ASM`
-
-### Typical outputs
-
-Depending on which stages are enabled, outputs may include:
-
-- REAPR-broken assembly
-- RagTag-patched assembly
-- NextPolish-polished assembly
-- optional RagTag-correct outputs
-- optional RagTag-scaffold outputs
-- optional deduplicated outputs when `RUN_SORTNR=1`
-
-### Minimal example
+### Minimal use
 
 ```bash
-cp reapr_patch_nextpolish_ragtag.env.example reapr_patch_nextpolish_ragtag.env
-$EDITOR reapr_patch_nextpolish_ragtag.env
-
-set -a
-source reapr_patch_nextpolish_ragtag.env
-set +a
-
-PRIMARY_ASM=/path/to/primary.fasta \
-DONOR_ASM=/path/to/donor.fasta \
-R1=/path/to/reads_R1.fastq.gz \
-R2=/path/to/reads_R2.fastq.gz \
-WORKDIR=/path/to/work_reapr_patch_nextpolish_ragtag \
-THREADS=10 \
-bash reapr_patch_nextpolish_ragtag.sh
+cp reapr_patch_nextpolish.env.example reapr_patch_nextpolish.env
+$EDITOR reapr_patch_nextpolish.env
+bash reapr_patch_nextpolish.sh
 ```
 
-### Example with reference-guided stages enabled
+### Typical direct invocation
 
 ```bash
 PRIMARY_ASM=/path/to/primary.fasta \
 DONOR_ASM=/path/to/donor.fasta \
-REFERENCE_ASM=/path/to/reference.fasta \
 R1=/path/to/reads_R1.fastq.gz \
 R2=/path/to/reads_R2.fastq.gz \
-WORKDIR=/path/to/work_reapr_patch_nextpolish_ragtag_refA \
+WORKDIR=/path/to/work_reapr_patch_nextpolish \
 THREADS=10 \
-bash reapr_patch_nextpolish_ragtag.sh
+bash reapr_patch_nextpolish.sh
 ```
 
-### Help
+## Script 2: `ragtag_project.sh`
+
+This script starts from an already polished/unanchored assembly and creates one reference-guided RagTag branch. It intentionally omits REAPR, patching, polishing, `sortnr`, and callable masking.
+
+### Main outputs
+
+- `WORKDIR/correct/ragtag.correct.fasta`
+- `WORKDIR/correct/ragtag.correct.reads.s.bam` when read validation is enabled
+- `WORKDIR/scaffold/ragtag.scaffold.fasta`
+- `WORKDIR/scaffold/ragtag.scaffold.agp`
+- `WORKDIR/ragtag_project.outputs.env`
+
+### Minimal use
 
 ```bash
-bash reapr_patch_nextpolish_ragtag.sh --help
+cp ragtag_project.env.example ragtag_project.refA.env
+$EDITOR ragtag_project.refA.env
+bash ragtag_project.sh ragtag_project.refA.env
 ```
 
----
+Run once per reference, using a separate `WORKDIR` for each branch.
 
-## Script 2: `run_callable_assembly.sh`
+## Script 3: `map_for_callable.sh`
 
-This script materializes a callable-constrained assembly view from a scaffold FASTA plus either:
+This script maps paired reads back to one assembly FASTA and writes the sorted/indexed BAM expected by `run_callable_assembly.sh`.
 
-- a precomputed callable BED
-- or a BAM-derived callable-region calculation
+### Main outputs
 
-### Main modes
+- `OUTDIR/map/<SAMPLE_TAG>.sorted.bam`
+- `OUTDIR/map/<SAMPLE_TAG>.sorted.bam.bai`
+- `OUTDIR/stats/flagstat.txt`
+- `OUTDIR/stats/samtools.stats.txt`
+- `OUTDIR/map_for_callable.outputs.env`
 
-- `MODE=scaffold_bam`
-- `MODE=corrected_query_agp`
+### Minimal use
 
-### Intended use
+```bash
+cp map_for_callable.env.example map_for_callable.refA.env
+$EDITOR map_for_callable.refA.env
+bash map_for_callable.sh map_for_callable.refA.env
+```
 
-Use this script when you want to:
+Use this for scaffold-coordinate remap support or for any `MODE=scaffold_bam` callable materialization.
 
-- derive callable regions from mapped reads
-- apply mapping-quality and depth thresholds
-- lift corrected-query callable intervals onto scaffold coordinates through AGP
-- generate masked and optionally callable-only FASTA views
+## Script 4: `run_callable_assembly.sh`
 
-### Key behavior
+This script materializes a callable-constrained assembly view from a scaffold FASTA plus either a precomputed callable BED or a BAM-derived callable-region calculation.
 
-- accepts either a **precomputed callable BED** or a **BAM**
-- can auto-calculate callable regions from `samtools depth`
-- supports explicit or derived depth thresholds
-- can emit:
-  - callable BED
-  - noncallable BED
-  - masked scaffold FASTA
-  - optional callable-only FASTA intervals
+### Modes
 
-### Mode summary
+- `MODE=scaffold_bam`: derive callable regions directly from a BAM aligned to `FASTA`.
+- `MODE=corrected_query_agp`: derive callable regions in corrected-query coordinates, then lift intervals to scaffold coordinates through AGP.
 
-#### `scaffold_bam`
-
-Use when callable regions should be derived directly from scaffold-coordinate BAM depth.
-
-#### `corrected_query_agp`
-
-Use when callable regions are first defined in corrected-query coordinates and then lifted to scaffold coordinates through an AGP file.
-
-This mode is useful in reference-guided branch workflows where the corrected-query BAM and AGP jointly define the callable scaffold-space product.
-
-### Typical inputs
-
-- `FASTA`
-- `BAM` or `CALLABLE_BED`
-- optional `AGP` in `corrected_query_agp` mode
-- optional `RAGTAG_CORRECT_LOG` for auto-parsing depth center in corrected-query workflows
-
-### Typical outputs
-
-- callable BED
-- noncallable BED
-- masked FASTA
-- optional callable-only FASTA intervals
-
-### Minimal example with a config file
-
-Copy and edit the shipped example config:
+### Minimal use
 
 ```bash
 cp callable_assembly.env.example callable_assembly.env
 $EDITOR callable_assembly.env
-```
-
-Example contents:
-
-```bash
-SAMPLE_TAG=sample1_refA
-MODE=corrected_query_agp
-FASTA=/path/to/ragtag.scaffold.fasta
-BAM=/path/to/ragtag.correct.reads.s.bam
-AGP=/path/to/ragtag.scaffold.agp
-OUTDIR=/path/to/results/callable_assembly/sample1_refA
-MQ_CUTOFF=30
-DEPTH_CENTER=79
-DEPTH_LOW=39
-DEPTH_HIGH=158
-MASK_CHAR=N
-OUTPUT_CALLABLE_ONLY=0
-```
-
-Then run:
-
-```bash
 bash run_callable_assembly.sh callable_assembly.env
 ```
 
-### Help
+### Corrected-query example
 
 ```bash
-bash run_callable_assembly.sh --help
+SAMPLE_TAG=sample_refA \
+MODE=corrected_query_agp \
+FASTA=/path/to/ragtag.scaffold.fasta \
+BAM=/path/to/correct/ragtag.correct.reads.s.bam \
+AGP=/path/to/scaffold/ragtag.scaffold.agp \
+RAGTAG_CORRECT_LOG=/path/to/logs/ragtag_correct.log \
+OUTDIR=/path/to/results/callable_assembly/sample_refA \
+bash run_callable_assembly.sh
 ```
 
----
+### Scaffold-BAM example
+
+```bash
+SAMPLE_TAG=sample_refA_scaffold \
+MODE=scaffold_bam \
+FASTA=/path/to/ragtag.scaffold.fasta \
+BAM=/path/to/results/callable_mapping/sample_refA_scaffold/map/sample_refA_scaffold.sorted.bam \
+OUTDIR=/path/to/results/callable_assembly/sample_refA_scaffold \
+bash run_callable_assembly.sh
+```
 
 ## Requirements
 
-The exact tool set depends on which parts of the scripts you enable.
+The exact tool set depends on which scripts are used.
 
-### Core requirements
+### Core
 
 - `bash`
-- `samtools`
 - `python3`
+- `samtools`
+- standard Unix tools (`sort`, `awk`, `grep`, `flock` where locking is used)
 
-### Common requirements for `reapr_patch_nextpolish_ragtag.sh`
+### `reapr_patch_nextpolish.sh`
 
 - `reapr`
 - `ragtag.py`
-- `nextpolish`
+- `nextPolish` / `nextpolish`
 - optional `polca.sh`
 - `seqtk`
 - `samtools`
-- one of:
-  - `smalt`
-  - `bwa-mem2`
-  - `strobealign`
-- `minimap2`
+- one REAPR mapper path: `smalt`, `bwa-mem2`, or `strobealign`
+- `minimap2` for RagTag read validation when enabled
 
-### Common requirements for `run_callable_assembly.sh`
+### `ragtag_project.sh`
+
+- `ragtag.py`
+- `samtools`
+- `minimap2` when using `RAGTAG_READ_ALIGNER=minimap2`
+
+### `map_for_callable.sh`
 
 - `samtools`
+- `bwa-mem2` or `bwa`
+- `python3` when optional depth summaries are enabled
+
+### `run_callable_assembly.sh`
+
+- `samtools`
+- `bedtools`
 - `python3`
-- standard Unix text-processing tools
-- AGP support files when using `MODE=corrected_query_agp`
 
 ## Installation
 
-Clone the repository and make the scripts executable if needed:
-
 ```bash
-git clone https://github.com/<USER>/assembly-callable-utils.git
+git clone https://github.com/zergger/assembly-callable-utils.git
 cd assembly-callable-utils
 chmod +x *.sh
 ```
 
-Install the external dependencies in your preferred environment manager.
+Install external dependencies in your preferred environment manager. The scripts resolve tools from `PATH` unless an absolute path is supplied in a config file.
 
-The repository also ships two example config templates:
+## Validation checks
 
-- `reapr_patch_nextpolish_ragtag.env.example`
-- `callable_assembly.env.example`
+```bash
+bash -n reapr_patch_nextpolish.sh
+bash -n ragtag_project.sh
+bash -n map_for_callable.sh
+bash -n run_callable_assembly.sh
+
+bash reapr_patch_nextpolish.sh --help
+bash ragtag_project.sh --help
+bash map_for_callable.sh --help
+bash run_callable_assembly.sh --help
+```
 
 ## Design philosophy
 
-These scripts reflect a conservative workflow style:
-
-- prefer **read-backed** refinement over aggressive graph surgery
-- keep **reference-guided** steps optional and explicit
-- treat callable-region definition as a **materialized object**, not just a summary statistic
-- preserve intermediate structure through stable work directories and logs
-
-## What this repository is not
-
-This repository is **not**:
-
-- a full manuscript-reproduction archive
-- a complete assembly benchmarking framework
-- a packaged workflow manager
-- a species-specific resource release
-- a guarantee that the default example paths match your environment
-
-You are expected to provide your own input paths and runtime environment.
-
-## Reproducibility note
-
-These scripts are wrappers around external tools. Reproducibility depends on:
-
-- exact software versions
-- consistent input files
-- environment setup
-- explicit parameter settings
-- stable path conventions
-
-For manuscript-grade reproduction, additional intermediate analysis code may be required.
-
-## Citation
-
-If you use these scripts in a publication, please cite:
-
-- the associated manuscript. In preparation.
-- the underlying external tools actually used in your run, including as applicable:
-  - REAPR
-  - RagTag
-  - NextPolish
-  - POLCA
-  - samtools
-  - minimap2
-  - bwa-mem2 / smalt / strobealign
+- Keep reference-guided projection explicit and per-reference.
+- Keep BAM generation separate from callable-mask materialization.
+- Treat callable masks as coordinate-specific objects, not portable sample-independent BED files.
+- Prefer read-backed correction and conservative callable thresholds over aggressive contiguity gains.
+- Use stable work directories and logs so each stage can be audited.
 
 ## License
-
-This repository is released under the **MIT License**.
 
 See `LICENSE`.

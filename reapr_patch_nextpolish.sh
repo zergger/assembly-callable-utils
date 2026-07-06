@@ -38,15 +38,16 @@ trap 'cleanup TERM' TERM
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'USAGE'
-Usage: reapr_patch_nextpolish_ragtag.sh
+Usage: reapr_patch_nextpolish.sh
 
 This pipeline intentionally follows a conservative,
 read-backed sequence:
   1) REAPR breakpoint detection and breaking
   2) RagTag patch using a donor assembly
   3) NextPolish Illumina polishing (default; POLCA optional)
-  4) RagTag correct with read validation (optional; requires reference)
-  5) RagTag reference-guided scaffolding (optional; requires reference)
+
+This script stops at a polished, unanchored assembly. Run
+ragtag_project.sh separately for reference-guided RagTag correct/scaffold.
 
 Key environment variables (defaults in brackets):
   THREADS=10
@@ -56,25 +57,16 @@ Key environment variables (defaults in brackets):
   SAMTOOLS_THREADS=1
 
 Inputs:
-  PRIMARY_ASM=/home/assem/SJF/work_masurca_platanus_ragtag/masurca/CA/primary.genome.scf.fasta
-  DONOR_ASM=/home/assem/SJF/work_masurca_platanus_ragtag/platanus/platanus_alt_contig.fa
-  REFERENCE_ASM= (optional; enables RagTag scaffolding)
-  R1=/home/fqdata/clean/SJF/SJF_R1.fastq.gz
-  R2=/home/fqdata/clean/SJF/SJF_R2.fastq.gz
+  PRIMARY_ASM=/path/to/primary.fasta
+  DONOR_ASM=/path/to/donor.fasta
+  R1=/path/to/reads_R1.fastq.gz
+  R2=/path/to/reads_R2.fastq.gz
 
 Workdir and toggles:
-  WORKDIR=/home/assem/SJF/work_reapr_patch_nextpolish_ragtag
+  WORKDIR=./work_reapr_patch_nextpolish
   DOWNSAMPLE_FRAC=1.0 (set <1.0 to downsample reads with seqtk)
   SEED=42
-  SAMPLE_ID=SJF
-  RUN_SORTNR=0
-  SORTNR_BASE=$WORKDIR/dedup/${SAMPLE_ID}_reapr_patch_nextpolish_ragtag
-
-RagTag correct options (effective only when REFERENCE_ASM is set):
-  RUN_RAGTAG_CORRECT=1
-  RAGTAG_CORRECT_VALIDATE=1
-  RAGTAG_READTYPE=sr
-  RAGTAG_READ_ALIGNER=minimap2
+  SAMPLE_ID=sample1
 
 RagTag patch options:
   RAGTAG_PATCH_NUCMER_PARAMS="--maxmatch -l 100 -c 500"
@@ -88,7 +80,7 @@ RagTag patch options:
 Polishing options:
   POLISHER=nextpolish (nextpolish|polca|none)
   POLCA_MEM_PER_THREAD=1G
-  NEXTPOLISH_BIN=nextpolish
+  NEXTPOLISH_BIN=nextPolish
   NEXTPOLISH_CFG= (auto-generated if empty)
   NEXTPOLISH_CMD= (optional; overrides NEXTPOLISH_CFG)
   NEXTPOLISH_OUT= (expected polished FASTA output)
@@ -120,11 +112,7 @@ REAPR options:
 
 Tool overrides:
   PY3=python3
-  DIPLOIDOCUS_PY=/app/diploidocus/code/diploidocus.py
-  DIPLOIDOCUS_INTERACTIVE=-1
-  DIPLOIDOCUS_FORKS=$THREADS
   REAPR_BIN=reapr
-  RAGTAG_BIN=ragtag.py
   RAGTAG_PATCH_BIN=$SCRIPT_DIR/ragtag_patch.py
   POLCA_BIN=polca.sh
   SEQTK_BIN=seqtk
@@ -143,13 +131,12 @@ POLCA_THREADS=${POLCA_THREADS:-$THREADS}
 RAGTAG_THREADS=${RAGTAG_THREADS:-$THREADS}
 SAMTOOLS_THREADS=${SAMTOOLS_THREADS:-1}
 
-PRIMARY_ASM=${PRIMARY_ASM:-/home/assem/SJF/work_masurca_platanus_ragtag/masurca/CA/primary.genome.scf.fasta}
-DONOR_ASM=${DONOR_ASM:-/home/assem/SJF/work_masurca_platanus_ragtag/platanus/platanus_alt_contig.fa}
-REFERENCE_ASM=${REFERENCE_ASM:-}
-R1=${R1:-/home/fqdata/clean/SJF/SJF_R1.fastq.gz}
-R2=${R2:-/home/fqdata/clean/SJF/SJF_R2.fastq.gz}
+PRIMARY_ASM=${PRIMARY_ASM:-}
+DONOR_ASM=${DONOR_ASM:-}
+R1=${R1:-}
+R2=${R2:-}
 
-WORKDIR=${WORKDIR:-/home/assem/SJF/work_reapr_patch_nextpolish_ragtag}
+WORKDIR=${WORKDIR:-$SCRIPT_DIR/work_reapr_patch_nextpolish}
 LOGDIR=${LOGDIR:-$WORKDIR/logs}
 READS_DIR=$WORKDIR/reads
 REAPR_DIR=$WORKDIR/reapr
@@ -157,15 +144,10 @@ REAPR_OUT=$REAPR_DIR/reapr_out
 PATCH_DIR=$WORKDIR/patch
 POLCA_DIR=$WORKDIR/polca
 NEXTPOLISH_DIR=$WORKDIR/nextpolish
-SCAFFOLD_DIR=$WORKDIR/scaffold
-CORRECT_DIR=$WORKDIR/correct
-DEDUP_DIR=$WORKDIR/dedup
 
 DOWNSAMPLE_FRAC=${DOWNSAMPLE_FRAC:-1.0}
 SEED=${SEED:-42}
-SAMPLE_ID=${SAMPLE_ID:-SJF}
-RUN_SORTNR=${RUN_SORTNR:-0}
-SORTNR_BASE=${SORTNR_BASE:-$DEDUP_DIR/${SAMPLE_ID}_reapr_patch_nextpolish_ragtag}
+SAMPLE_ID=${SAMPLE_ID:-sample1}
 
 RUN_REAPR_PERFECTMAP=${RUN_REAPR_PERFECTMAP:-0}
 REAPR_INSERT_SIZE=${REAPR_INSERT_SIZE:-220}
@@ -187,24 +169,16 @@ BWA_MEM2_ARGS=${BWA_MEM2_ARGS:--SP}
 STROBEALIGN_BIN=${STROBEALIGN_BIN:-strobealign}
 STROBEALIGN_ARGS=${STROBEALIGN_ARGS:---mcs=always -R 0}
 
-RUN_RAGTAG_CORRECT=${RUN_RAGTAG_CORRECT:-1}
-RAGTAG_CORRECT_VALIDATE=${RAGTAG_CORRECT_VALIDATE:-1}
-RAGTAG_READTYPE=${RAGTAG_READTYPE:-sr}
-RAGTAG_READ_ALIGNER=${RAGTAG_READ_ALIGNER:-minimap2}
 RAGTAG_PATCH_NUCMER_PARAMS=${RAGTAG_PATCH_NUCMER_PARAMS:---maxmatch -l 100 -c 500}
 RAGTAG_FILTER_PROCS=${RAGTAG_FILTER_PROCS:-$THREADS}
 GLOBAL_LOCK_WAIT_SEC=${GLOBAL_LOCK_WAIT_SEC:-${PATCH_LOCK_WAIT_SEC:-0}}
 GLOBAL_LOCK_FILE=${GLOBAL_LOCK_FILE:-${PATCH_LOCK_FILE:-$WORKDIR/.pipeline.lock}}
 
 REAPR_BIN=${REAPR_BIN:-reapr}
-RAGTAG_BIN=${RAGTAG_BIN:-ragtag.py}
 RAGTAG_PATCH_BIN=${RAGTAG_PATCH_BIN:-$SCRIPT_DIR/ragtag_patch.py}
 POLCA_BIN=${POLCA_BIN:-polca.sh}
 SEQTK_BIN=${SEQTK_BIN:-seqtk}
 PY3=${PY3:-python3}
-DIPLOIDOCUS_PY=${DIPLOIDOCUS_PY:-/app/diploidocus/code/diploidocus.py}
-DIPLOIDOCUS_INTERACTIVE=${DIPLOIDOCUS_INTERACTIVE:--1}
-DIPLOIDOCUS_FORKS=${DIPLOIDOCUS_FORKS:-$THREADS}
 
 POLCA_MEM_PER_THREAD=${POLCA_MEM_PER_THREAD:-1G}
 POLISHER=${POLISHER:-nextpolish}
@@ -232,9 +206,6 @@ PATCH_FASTA=$PATCH_DIR/ragtag.patch.fasta
 POLCA_INPUT=$POLCA_DIR/polca_input.fa
 POLCA_RAW_OUT=${POLCA_INPUT}.Polca.fa
 POLCA_FINAL=$POLCA_DIR/polca.polished.fa
-CORRECT_FASTA=$CORRECT_DIR/ragtag.correct.fasta
-SCAFFOLD_FASTA=$SCAFFOLD_DIR/ragtag.scaffold.fasta
-SORTNR_OUT=${SORTNR_BASE}.nr.fasta
 
 log() {
   printf '[%(%F %T)T] %s\n' -1 "$*" >&2
@@ -261,6 +232,10 @@ cleanup_incomplete_bam() {
 
 require_file() {
   local p=$1
+  if [[ -z "$p" ]]; then
+    echo "ERROR: required file path is empty. Set it in the environment or config file." >&2
+    exit 1
+  fi
   if [[ ! -f "$p" ]]; then
     echo "ERROR: required file not found: $p" >&2
     exit 1
@@ -433,16 +408,13 @@ require_reapr_aligner() {
   esac
 }
 
-mkdir -p "$WORKDIR" "$LOGDIR" "$READS_DIR" "$REAPR_DIR" "$PATCH_DIR" "$POLCA_DIR" "$NEXTPOLISH_DIR" "$CORRECT_DIR" "$SCAFFOLD_DIR" "$DEDUP_DIR"
+mkdir -p "$WORKDIR" "$LOGDIR" "$READS_DIR" "$REAPR_DIR" "$PATCH_DIR" "$POLCA_DIR" "$NEXTPOLISH_DIR"
 acquire_global_lock
 
 require_file "$PRIMARY_ASM"
 require_file "$DONOR_ASM"
 require_file "$R1"
 require_file "$R2"
-if [[ -n "$REFERENCE_ASM" ]]; then
-  require_file "$REFERENCE_ASM"
-fi
 
 require_cmd "$REAPR_BIN"
 if [[ -n "$REAPR_BAM" ]]; then
@@ -451,7 +423,6 @@ else
   require_reapr_aligner
 fi
 require_cmd samtools
-require_cmd "$RAGTAG_BIN"
 require_cmd "$RAGTAG_PATCH_BIN"
 require_cmd minimap2
 require_cmd nucmer
@@ -469,19 +440,10 @@ else
   exit 1
 fi
 require_cmd bwa
-if [[ "$RUN_SORTNR" == "1" ]]; then
-  require_cmd "$PY3"
-  require_file "$DIPLOIDOCUS_PY"
-fi
 
-log "Pipeline: REAPR -> RagTag patch -> polishing (NextPolish default; POLCA optional) -> RagTag correct -> RagTag scaffold"
+log "Pipeline: REAPR -> RagTag patch -> polishing (NextPolish default; POLCA optional)"
 log "Primary assembly: $PRIMARY_ASM"
 log "Donor assembly:   $DONOR_ASM"
-if [[ -n "$REFERENCE_ASM" ]]; then
-  log "Reference:         $REFERENCE_ASM"
-else
-  log "Reference:         (none; scaffolding will be skipped)"
-fi
 log "Reads:             $R1 , $R2"
 log "Workdir:           $WORKDIR"
 if [[ -z "$REAPR_BAM" && "$REAPR_ALIGNER" != "smalt" ]]; then
@@ -740,70 +702,7 @@ else
   log "Polishing disabled (POLISHER=$POLISHER); using patch output"
 fi
 
-corrected_assembly=$polished_assembly
-if [[ -n "$REFERENCE_ASM" && "$RUN_RAGTAG_CORRECT" == "1" ]]; then
-  correct_validate_arg=()
-  if [[ "$RAGTAG_CORRECT_VALIDATE" == "1" ]]; then
-    if [[ -n "$current_r2" && "$current_r2" != "$current_r1" ]]; then
-      correct_validate_fofn=$CORRECT_DIR/ragtag_correct.reads.fofn
-      printf '%s\n%s\n' "$current_r1" "$current_r2" > "$correct_validate_fofn"
-      correct_validate_arg=(-F "$correct_validate_fofn" -T "$RAGTAG_READTYPE")
-    else
-      correct_validate_arg=(-R "$current_r1" -T "$RAGTAG_READTYPE")
-    fi
-    if [[ -n "$RAGTAG_READ_ALIGNER" ]]; then
-      correct_validate_arg+=(--read-aligner "$RAGTAG_READ_ALIGNER")
-    fi
-  fi
-
-  if exists_nonempty "$CORRECT_FASTA"; then
-    log "RagTag correct output exists; skipping correct"
-  else
-    run_with_log "$LOGDIR/ragtag_correct.log" \
-      "$RAGTAG_BIN" correct -o "$CORRECT_DIR" -t "$RAGTAG_THREADS" \
-      "${correct_validate_arg[@]}" \
-      "$REFERENCE_ASM" "$polished_assembly"
-  fi
-
-  if exists_nonempty "$CORRECT_FASTA"; then
-    corrected_assembly=$CORRECT_FASTA
-  else
-    echo "ERROR: expected RagTag correct output not found: $CORRECT_FASTA" >&2
-    exit 1
-  fi
-elif [[ -n "$REFERENCE_ASM" && "$RUN_RAGTAG_CORRECT" != "1" ]]; then
-  log "RagTag correct disabled (RUN_RAGTAG_CORRECT=$RUN_RAGTAG_CORRECT); scaffolding will use polished output"
-fi
-
-final_assembly=$corrected_assembly
-if [[ -n "$REFERENCE_ASM" ]]; then
-  if exists_nonempty "$SCAFFOLD_FASTA"; then
-    log "RagTag scaffold output exists; skipping scaffold"
-  else
-    run_with_log "$LOGDIR/ragtag_scaffold.log" \
-      "$RAGTAG_BIN" scaffold -o "$SCAFFOLD_DIR" -t "$RAGTAG_THREADS" "$REFERENCE_ASM" "$corrected_assembly"
-  fi
-  if exists_nonempty "$SCAFFOLD_FASTA"; then
-    final_assembly=$SCAFFOLD_FASTA
-  else
-    echo "WARNING: RagTag scaffold did not produce $SCAFFOLD_FASTA; using polished output" >&2
-  fi
-fi
-
-if [[ "$RUN_SORTNR" == "1" ]]; then
-  if exists_nonempty "$SORTNR_OUT"; then
-    log "Diploidocus sortnr output exists; skipping sortnr"
-  else
-    log "Running diploidocus sortnr"
-    run_with_log "$LOGDIR/diploidocus_sortnr.log" \
-      "$PY3" "$DIPLOIDOCUS_PY" runmode=sortnr seqin="$final_assembly" basefile="$SORTNR_BASE" "i=$DIPLOIDOCUS_INTERACTIVE" "forks=$DIPLOIDOCUS_FORKS"
-  fi
-  if ! exists_nonempty "$SORTNR_OUT"; then
-    echo "ERROR: expected Diploidocus sortnr output not found: $SORTNR_OUT" >&2
-    exit 1
-  fi
-  final_assembly=$SORTNR_OUT
-fi
+final_assembly=$polished_assembly
 
 log "Done. Key outputs:"
 log "  REAPR broken assembly: $REAPR_BROKEN"
@@ -815,12 +714,5 @@ elif [[ "$POLISHER" == "nextpolish" ]]; then
 else
   log "  Polishing:             (disabled)"
 fi
-if [[ -n "$REFERENCE_ASM" ]]; then
-  log "  RagTag correct:        $CORRECT_FASTA"
-  log "  RagTag scaffold:       $SCAFFOLD_FASTA"
-fi
-if [[ "$RUN_SORTNR" == "1" ]]; then
-  log "  Diploidocus sortnr:    $SORTNR_OUT"
-fi
-log "  Final assembly:        $final_assembly"
+log "  Final polished assembly: $final_assembly"
 release_global_lock
