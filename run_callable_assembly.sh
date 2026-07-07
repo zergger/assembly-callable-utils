@@ -81,6 +81,32 @@ should_refresh() {
   [[ "$FORCE" == "1" || ! -s "$out" ]]
 }
 
+sort_bed_by_fai() {
+  local bed="$1"
+  local out="$2"
+  awk 'BEGIN{OFS="\t"}
+       NR==FNR {rank[$1]=NR; next}
+       !/^#/ && NF>=3 {
+         if (!($1 in rank)) {
+           print "ERROR: BED contig not found in FASTA index: " $1 > "/dev/stderr"
+           exit 2
+         }
+         print rank[$1], $0
+       }' "$FAI" "$bed" \
+    | sort -k1,1n -k3,3n -k4,4n \
+    | cut -f2- > "$out"
+}
+
+merge_bed_by_fai() {
+  local bed="$1"
+  local out="$2"
+  local sorted_tmp="${out}.fai_sorted.$$"
+  rm -f "$sorted_tmp"
+  sort_bed_by_fai "$bed" "$sorted_tmp"
+  "$BEDTOOLS" merge -i "$sorted_tmp" > "$out"
+  rm -f "$sorted_tmp"
+}
+
 FASTA="$(resolve_path "${FASTA:-}")"
 require_file "$FASTA"
 FAI="$FASTA.fai"
@@ -173,7 +199,7 @@ PY
 if [[ -n "$CALLABLE_BED" ]]; then
   log "reuse provided callable BED: $CALLABLE_BED"
   if should_refresh "$CALLABLE_OUT"; then
-    sort -k1,1 -k2,2n "$CALLABLE_BED" | "$BEDTOOLS" merge -i - > "$CALLABLE_OUT"
+    merge_bed_by_fai "$CALLABLE_BED" "$CALLABLE_OUT"
   fi
   printf 'metric\tvalue\nsource\tprovided_callable_bed\n' > "$CENTER_TSV"
   {
@@ -258,19 +284,27 @@ PY
   } > "$THRESH_TSV"
 
   if should_refresh "$CALLABLE_OUT"; then
-    log "derive callable BED from BAM"
-    "$SAMTOOLS" depth -aa -Q "$MQ_CUTOFF" -d 0 "$BAM" \
-      | "$PYTHON_BIN" "$ROOT_DIR/scripts/callable_regions_from_depth.py" bed --low "$DEPTH_LOW" --high "$DEPTH_HIGH" \
-      > "$RAW_BED"
-    if [[ "$MODE" == "corrected_query_agp" ]]; then
-      log "lift callable BED from corrected-query to scaffold coordinates"
-      "$PYTHON_BIN" "$ROOT_DIR/scripts/agp_liftover_bed.py" \
-        --agp "$AGP" \
-        --bed "$RAW_BED" \
-        --output "$LIFTED_RAW_BED"
-      sort -k1,1 -k2,2n "$LIFTED_RAW_BED" | "$BEDTOOLS" merge -i - > "$CALLABLE_OUT"
+    if [[ "$FORCE" == "1" || ! -s "$RAW_BED" ]]; then
+      log "derive callable BED from BAM"
+      "$SAMTOOLS" depth -aa -Q "$MQ_CUTOFF" -d 0 "$BAM" \
+        | "$PYTHON_BIN" "$ROOT_DIR/scripts/callable_regions_from_depth.py" bed --low "$DEPTH_LOW" --high "$DEPTH_HIGH" \
+        > "$RAW_BED"
     else
-      sort -k1,1 -k2,2n "$RAW_BED" | "$BEDTOOLS" merge -i - > "$CALLABLE_OUT"
+      log "reuse existing raw callable BED: $RAW_BED"
+    fi
+    if [[ "$MODE" == "corrected_query_agp" ]]; then
+      if [[ "$FORCE" == "1" || ! -s "$LIFTED_RAW_BED" ]]; then
+        log "lift callable BED from corrected-query to scaffold coordinates"
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/agp_liftover_bed.py" \
+          --agp "$AGP" \
+          --bed "$RAW_BED" \
+          --output "$LIFTED_RAW_BED"
+      else
+        log "reuse existing lifted callable BED: $LIFTED_RAW_BED"
+      fi
+      merge_bed_by_fai "$LIFTED_RAW_BED" "$CALLABLE_OUT"
+    else
+      merge_bed_by_fai "$RAW_BED" "$CALLABLE_OUT"
     fi
   fi
 fi
