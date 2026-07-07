@@ -24,7 +24,9 @@ It is not a complete manuscript-support archive, workflow manager, figure-genera
 ├── README.md
 ├── ab_window_core_shell.env.example
 ├── ab_window_core_shell.sh
+├── agp_liftover_bed.py
 ├── callable_assembly.env.example
+├── callable_regions_from_depth.py
 ├── map_for_callable.env.example
 ├── map_for_callable.sh
 ├── quantify_core_shell.py
@@ -285,7 +287,7 @@ bash map_for_callable.sh --help
 bash run_callable_assembly.sh --help
 bash ab_window_core_shell.sh --help
 
-python3 -m py_compile window_liftover_stats.py quantify_core_shell.py
+python3 -m py_compile callable_regions_from_depth.py agp_liftover_bed.py window_liftover_stats.py quantify_core_shell.py
 ```
 
 ## Design philosophy
