@@ -314,7 +314,9 @@ python3 -m py_compile callable_regions_from_depth.py agp_liftover_bed.py window_
 
 ## Citation
 
-A formal citation for this utility repository is being prepared. For now, cite the underlying tools used in the specific workflow you run.
+If you use this repository, please cite:
+
+> Liu, K., Zhang, W., Qiao, J. et al. *Dual-reference projection defines a callable core and reference-sensitive shell in a Qiantang River Megalobrama draft assembly.* **Functional & Integrative Genomics** 26, 216 (2026). [https://doi.org/10.1007/s10142-026-01999-6](https://doi.org/10.1007/s10142-026-01999-6)
 
 ## License
 
