@@ -8,7 +8,7 @@ These scripts were developed in the context of a short-read draft assembly workf
 
 This repository provides five reusable utilities:
 
-1. `reapr_patch_nextpolish.sh` — refine an Illumina-only draft assembly before projection.
+1. `masurca_platanus_reapr.sh` — generate MaSuRCA/Platanus drafts, then run REAPR, RagTag patch, and NextPolish.
 2. `ragtag_project.sh` — project an already polished assembly onto one reference with RagTag correct/scaffold.
 3. `map_for_callable.sh` — remap reads to one final FASTA and create a sorted/indexed BAM.
 4. `run_callable_assembly.sh` — derive callable regions and write callable-masked FASTA outputs.
@@ -29,11 +29,12 @@ It is not a complete manuscript-support archive, workflow manager, figure-genera
 ├── callable_regions_from_depth.py
 ├── map_for_callable.env.example
 ├── map_for_callable.sh
+├── masurca.cfg.example
+├── masurca_platanus_reapr.env.example
+├── masurca_platanus_reapr.sh
 ├── quantify_core_shell.py
 ├── ragtag_project.env.example
 ├── ragtag_project.sh
-├── reapr_patch_nextpolish.env.example
-├── reapr_patch_nextpolish.sh
 ├── run_callable_assembly.sh
 └── window_liftover_stats.py
 ```
@@ -43,8 +44,10 @@ It is not a complete manuscript-support archive, workflow manager, figure-genera
 For one sample and two references, the intended order is:
 
 ```text
-primary assembly + donor assembly + PE reads
-  └── reapr_patch_nextpolish.sh
+PE reads + MaSuRCA config
+  └── masurca_platanus_reapr.sh
+        -> MaSuRCA primary draft
+        -> Platanus donor draft
         -> polished unanchored assembly
 
 polished assembly + reference A + PE reads
@@ -74,38 +77,43 @@ A/B branch FASTAs + A/B callable BEDs
 
 The critical rule is that a BAM must be aligned to the same coordinate FASTA used by `run_callable_assembly.sh`, unless `MODE=corrected_query_agp` is used with a corrected-query BAM plus the corresponding RagTag AGP file.
 
-`reapr_patch_nextpolish.sh` intentionally stops at the polished unanchored assembly. Reference-guided RagTag correct/scaffold is handled by `ragtag_project.sh`, which should be run separately for each reference branch.
+`masurca_platanus_reapr.sh` intentionally stops at the polished unanchored assembly. Reference-guided RagTag correct/scaffold is handled by `ragtag_project.sh`, which should be run separately for each reference branch.
 
-## Script 1: `reapr_patch_nextpolish.sh`
+## Script 1: `masurca_platanus_reapr.sh`
 
-This script implements a conservative read-backed refinement path for a draft assembly.
+This script implements a conservative read-backed assembly and refinement path from paired short reads.
 
 ### Main stages
 
-1. REAPR breakpoint detection and breaking
-2. RagTag patch using a donor assembly
-3. NextPolish Illumina polishing by default (`POLCA` optional)
+1. MaSuRCA primary draft assembly
+2. Platanus donor draft assembly
+3. REAPR breakpoint detection and breaking
+4. RagTag patch using the Platanus donor assembly
+5. NextPolish Illumina polishing by default (`POLCA` optional)
 
 This script does not run RagTag correct/scaffold and does not run post-polish redundancy or contamination filtering. Run `ragtag_project.sh` for reference projection, and use a separate local cleanup stage if `sortnr`, FCS-GX, or other post-polish filters are needed.
+
+`DOWNSAMPLE_FRAC=1.0` keeps the full read set. If those reads are gzip-compressed, compatible stages retain the gzip paths while Platanus receives temporary uncompressed FASTQ files staged under `WORKDIR/reads/`. `PLATANUS_DECOMPRESSOR=auto` prefers `pigz -dc -p PLATANUS_DECOMPRESS_THREADS` and falls back to `gzip -cd`. After Platanus succeeds and produces a non-empty contig, the two plain staging FASTQ files are deleted; failed runs retain them for retry. Values below `1.0` use one deterministic, uncompressed `seqtk` subset for both Platanus and REAPR and are not cleaned by this rule.
 
 ### Minimal use
 
 ```bash
-cp reapr_patch_nextpolish.env.example reapr_patch_nextpolish.env
-$EDITOR reapr_patch_nextpolish.env
-bash reapr_patch_nextpolish.sh
+cp masurca.cfg.example masurca.cfg
+cp masurca_platanus_reapr.env.example masurca_platanus_reapr.env
+$EDITOR masurca.cfg
+$EDITOR masurca_platanus_reapr.env
+bash masurca_platanus_reapr.sh masurca_platanus_reapr.env
 ```
 
 ### Typical direct invocation
 
 ```bash
-PRIMARY_ASM=/path/to/primary.fasta \
-DONOR_ASM=/path/to/donor.fasta \
 R1=/path/to/reads_R1.fastq.gz \
 R2=/path/to/reads_R2.fastq.gz \
-WORKDIR=/path/to/work_reapr_patch_nextpolish \
+MASURCA_CFG=/path/to/masurca.cfg \
+WORKDIR=/path/to/work_masurca_platanus_reapr \
 THREADS=10 \
-bash reapr_patch_nextpolish.sh
+bash masurca_platanus_reapr.sh
 ```
 
 ## Script 2: `ragtag_project.sh`
@@ -227,16 +235,21 @@ The exact tool set depends on which scripts are used.
 - `samtools`
 - standard Unix tools (`sort`, `awk`, `grep`, `flock` where locking is used)
 
-### `reapr_patch_nextpolish.sh`
+### `masurca_platanus_reapr.sh`
 
+- `masurca`
+- `seqtk` only if `DOWNSAMPLE_FRAC<1.0`
+- `pigz` is preferred for full-read `.gz` Platanus inputs; `gzip` is the automatic fallback
+- `Platanus`
 - `reapr`
-- `ragtag.py`
+- Standard RagTag installation providing `ragtag.py`
+- MUMmer tools used by RagTag patch (`nucmer` and related RagTag conversion helpers from a RagTag install)
 - `NextPolish` command-line executable (`nextPolish`)
 - optional `polca.sh`
-- `seqtk`
 - `samtools`
-- one REAPR mapper path: `smalt`, `bwa-mem2`, or `minibwa`
-- `minimap2` for RagTag read validation when enabled
+- one REAPR mapper path: `bwa-mem2` by default, or `smalt` / `minibwa` if selected
+- `minimap2`
+- `bwa`
 
 ### `ragtag_project.sh`
 
@@ -275,13 +288,13 @@ Install external dependencies in your preferred environment manager. The scripts
 ## Validation checks
 
 ```bash
-bash -n reapr_patch_nextpolish.sh
+bash -n masurca_platanus_reapr.sh
 bash -n ragtag_project.sh
 bash -n map_for_callable.sh
 bash -n run_callable_assembly.sh
 bash -n ab_window_core_shell.sh
 
-bash reapr_patch_nextpolish.sh --help
+bash masurca_platanus_reapr.sh --help
 bash ragtag_project.sh --help
 bash map_for_callable.sh --help
 bash run_callable_assembly.sh --help

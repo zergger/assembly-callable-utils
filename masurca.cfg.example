@@ -1,0 +1,10 @@
+DATA
+PE= p1 230 30 /path/to/reads_R1.fastq.gz /path/to/reads_R2.fastq.gz
+END
+
+PARAMETERS
+GRAPH_KMER_SIZE=81
+NUM_THREADS=10
+JF_SIZE=5000000000
+CLOSE_GAPS=0
+END
