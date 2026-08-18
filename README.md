@@ -95,6 +95,8 @@ This script does not run RagTag correct/scaffold and does not run post-polish re
 
 `DOWNSAMPLE_FRAC=1.0` keeps the full read set. If those reads are gzip-compressed, compatible stages retain the gzip paths while Platanus receives temporary uncompressed FASTQ files staged under `WORKDIR/reads/`. `PLATANUS_DECOMPRESSOR=auto` prefers `pigz -dc -p PLATANUS_DECOMPRESS_THREADS` and falls back to `gzip -cd`. After Platanus succeeds and produces a non-empty contig, the two plain staging FASTQ files are deleted; failed runs retain them for retry. Values below `1.0` use one deterministic, uncompressed `seqtk` subset for both Platanus and REAPR and are not cleaned by this rule.
 
+REAPR BAM sorting probes explicit samtools help, writes to run-unique temporary paths, and publishes the BAM plus index only after both operations succeed. A failed sort or index leaves the source mapping BAM available for resume. The bwa-mem2 resume gate accepts complete indexes using either `.bwt.2bit` or `.bwt.2bit.64`.
+
 ### Minimal use
 
 ```bash
@@ -299,6 +301,8 @@ bash ragtag_project.sh --help
 bash map_for_callable.sh --help
 bash run_callable_assembly.sh --help
 bash ab_window_core_shell.sh --help
+
+bash tests/test_masurca_platanus_reapr_helpers.sh
 
 python3 -m py_compile callable_regions_from_depth.py agp_liftover_bed.py window_liftover_stats.py quantify_core_shell.py
 ```

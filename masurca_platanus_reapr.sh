@@ -209,7 +209,15 @@ cleanup_incomplete_bam() {
 
 samtools_supports_threads() {
   local subcmd=$1
-  samtools "$subcmd" 2>&1 | grep -q -- " -@"
+  local out
+  out=$(samtools "$subcmd" --help 2>&1 || true)
+  grep -q -- " -@" <<<"$out"
+}
+
+samtools_sort_supports_output() {
+  local out
+  out=$(samtools sort --help 2>&1 || true)
+  grep -q -- " -o" <<<"$out"
 }
 
 samtools_supports_markdup() {
@@ -247,7 +255,8 @@ samtools_sort_index() {
     return 0
   fi
   cleanup_incomplete_bam "$out_bam"
-  local tmp_out="${out_bam}.tmp.$$"
+  local tmp_out="${out_bam}.tmp.$$.bam"
+  local sort_tmp_prefix="${tmp_out}.sort"
   if [[ "${SAMTOOLS_THREADS:-1}" -gt 1 ]] && samtools_supports_threads sort; then
     sort_threads=(-@ "$SAMTOOLS_THREADS")
   fi
@@ -255,20 +264,33 @@ samtools_sort_index() {
     index_threads=(-@ "$SAMTOOLS_THREADS")
   fi
   if [[ "$style" == "auto" ]]; then
-    if samtools sort 2>&1 | grep -q -- " -o"; then
+    if samtools_sort_supports_output; then
       style="new"
     else
       style="old"
     fi
   fi
+  local sort_rc=0
   if [[ "$style" == "new" ]]; then
-    samtools sort "${sort_threads[@]}" -o "$tmp_out" "$in_bam"
+    samtools sort "${sort_threads[@]}" -T "$sort_tmp_prefix" -o "$tmp_out" "$in_bam" || sort_rc=$?
   else
     local prefix=${tmp_out%.bam}
-    samtools sort "${sort_threads[@]}" "$in_bam" "$prefix"
+    samtools sort "${sort_threads[@]}" "$in_bam" "$prefix" || sort_rc=$?
     tmp_out="${prefix}.bam"
   fi
-  samtools index "${index_threads[@]}" "$tmp_out"
+  if [[ "$sort_rc" -ne 0 ]]; then
+    log "samtools sort failed (exit=$sort_rc): $in_bam"
+    rm -f "$tmp_out" "${tmp_out}.bai" "${tmp_out}.csi" "${sort_tmp_prefix}".*.bam
+    return "$sort_rc"
+  fi
+
+  local index_rc=0
+  samtools index "${index_threads[@]}" "$tmp_out" || index_rc=$?
+  if [[ "$index_rc" -ne 0 ]]; then
+    log "samtools index failed (exit=$index_rc): $tmp_out"
+    rm -f "$tmp_out" "${tmp_out}.bai" "${tmp_out}.csi" "${sort_tmp_prefix}".*.bam
+    return "$index_rc"
+  fi
   if [[ -s "${tmp_out}.bai" ]]; then
     mv -f "$tmp_out" "$out_bam"
     mv -f "${tmp_out}.bai" "${out_bam}.bai"
@@ -276,8 +298,19 @@ samtools_sort_index() {
     mv -f "$tmp_out" "$out_bam"
     mv -f "${tmp_out}.csi" "${out_bam}.csi"
   else
-    die "samtools index did not produce .bai/.csi for $tmp_out"
+    log "samtools index did not produce .bai/.csi for $tmp_out"
+    rm -f "$tmp_out" "${tmp_out}.bai" "${tmp_out}.csi" "${sort_tmp_prefix}".*.bam
+    return 1
   fi
+}
+
+bwa_mem2_index_ready() {
+  local prefix=$1
+  local suffix
+  for suffix in .0123 .amb .ann .pac; do
+    [[ -s "${prefix}${suffix}" ]] || return 1
+  done
+  [[ -s "${prefix}.bwt.2bit" || -s "${prefix}.bwt.2bit.64" ]]
 }
 
 require_reapr_aligner() {
@@ -700,7 +733,7 @@ else
       rm -f "$tmp_bam"
     elif [[ "$REAPR_ALIGNER" == "bwa-mem2" ]]; then
       bwa2_prefix=$REAPR_DIR/reapr_bwa2
-      if [[ ! -s "${bwa2_prefix}.bwt.2bit" ]]; then
+      if ! bwa_mem2_index_ready "$bwa2_prefix"; then
         run_with_log "$LOGDIR/reapr_bwa2_index.log" \
           bwa-mem2 index -p "$bwa2_prefix" "$REAPR_CHECKED"
       fi
