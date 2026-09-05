@@ -64,13 +64,13 @@ if [[ -n "$CONFIG_FILE" ]]; then
       exit 1
     fi
   fi
-  # shellcheck disable=SC1090
   set -a
+  # shellcheck disable=SC1090
   source "$CONFIG_FILE"
   set +a
 elif [[ -f "$DEFAULT_CONFIG" ]]; then
-  # shellcheck disable=SC1090
   set -a
+  # shellcheck disable=SC1090
   source "$DEFAULT_CONFIG"
   set +a
 fi
@@ -116,7 +116,9 @@ exists_nonempty() {
 samtools_threads_arg() {
   local subcmd="$1"
   local threads="$2"
-  if [[ "$threads" -gt 1 ]] && { "$SAMTOOLS" "$subcmd" 2>&1 || true; } | grep -q -- ' -@'; then
+  local help_text
+  help_text="$("$SAMTOOLS" "$subcmd" --help 2>&1 || true)"
+  if [[ "$threads" -gt 1 ]] && grep -q -- ' -@' <<<"$help_text"; then
     printf -- '-@ %s' "$threads"
   fi
 }
@@ -196,6 +198,8 @@ write_depth_summary() {
   fi
 
   log "Write depth summary: $out_tsv"
+  # The single-quoted block is Python source, not a Bash string expression.
+  # shellcheck disable=SC1012,SC2026
   "${depth_cmd[@]}" | "$PYTHON_BIN" -c '
 import collections
 import csv
