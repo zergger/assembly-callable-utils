@@ -162,6 +162,9 @@ bash map_for_callable.sh map_for_callable.refA.env
 
 Use this for scaffold-coordinate remap support or for any `MODE=scaffold_bam` callable materialization.
 
+Samtools capability checks call `<subcommand> --help`; they never invoke a
+data-consuming subcommand without arguments or probe it through standard input.
+
 ## Script 4: `run_callable_assembly.sh`
 
 This script materializes a callable-constrained assembly view from a scaffold FASTA plus either a precomputed callable BED or a BAM-derived callable-region calculation.
@@ -303,6 +306,7 @@ bash run_callable_assembly.sh --help
 bash ab_window_core_shell.sh --help
 
 bash tests/test_masurca_platanus_reapr_helpers.sh
+bash tests/test_map_for_callable_helpers.sh
 
 python3 -m py_compile callable_regions_from_depth.py agp_liftover_bed.py window_liftover_stats.py quantify_core_shell.py
 ```
